@@ -7,6 +7,3 @@ def bye():
 
 
 print(hello())
-
-      - name: Run Super-Linter
-        uses: github/super-linter@v3.17.0
