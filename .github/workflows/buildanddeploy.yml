@@ -1,0 +1,78 @@
+name: Deploy to Cloud Run from Source
+
+on:
+  push:
+    branches:
+      - "main"
+
+env:
+  PROJECT_ID: ${{ secrets.RUN_PROJECT }}  # TODO: update Google Cloud project id
+  SERVICE: veerababu-devops # TODO: update Cloud Run service name
+  REGION: ap-south-1 # TODO: update Cloud Run service region
+  DOCKER_REPO: ${{ secrets.DOCKER_REPO }}
+  DOCKER_USER: ${{ secrets.DOCKER_USER }}
+  DOCKER_PASS: ${{ secrets.DOCKER_PASS }}
+  AWS_CREDS: ${{ secrets.AWS_CREDENTIALS }}
+
+jobs:
+  build:
+    name: Building Code
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11.0.4
+      - name: Maven Package
+        run: mvn -B clean package -DskipTests
+      - name: Maven Verify
+        run: mvn -B clean verify -Pintegration-test
+
+  docker:
+    name: Publish - Docker Hub
+    runs-on: self-hosted
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v1
+      - name: Set up JDK 11
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11.0.4
+      - name: Login to Docker Hub
+        run: docker login -u $DOCKER_USER -p $DOCKER_PASS
+      - name: Build Docker image
+        run: docker build -f Dockerfile -t $DOCKER_REPO .
+      - name: Publish Docker image
+        run: docker push $DOCKER_REPO:latest
+
+  deploy:
+    # Add 'id-token' with the intended permissions for workload identity federation
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    runs-on: self-hosted
+    needs: [docker]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: AWS Auth
+        id: auth
+        uses: 'google-github-actions/auth@v0'
+        with:
+          credentials_json: '$AWS_CREDS'
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v0
+        with:
+          service: $SERVICE
+          region: $REGION
+          # NOTE: If required, update to the appropriate source folder
+          image: '$DOCKER_REPO:latest'
+
+      # If required, use the Cloud Run url output in later steps
+      - name: Show Output
+        run: echo ${{ steps.deploy.outputs.url }}
